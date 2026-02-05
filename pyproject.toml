@@ -1,0 +1,39 @@
+[project]
+name = "datacite-data-file-dl"
+version = "0.1.0"
+description = "CLI utility to download DataCite monthly data files"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.28",
+    "boto3>=1.26",
+    "tqdm>=4.65",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "responses>=0.23",
+    "moto[s3]>=4.0",
+    "mypy>=1.0",
+    "boto3-stubs[s3]>=1.26",
+    "types-requests>=2.28",
+    "types-tqdm>=4.65",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+datacite-data-file-dl = "datacite_data_file_dl.__main__:main"
+ddf-dl = "datacite_data_file_dl.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/datacite_data_file_dl"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
