@@ -14,6 +14,7 @@ class InsecureConfigWarning(UserWarning):
 
     pass
 
+
 # tomli is in stdlib as tomllib in Python 3.11+
 if sys.version_info >= (3, 11):
     import tomllib
@@ -45,6 +46,7 @@ class Config:
     path: str | None = None
     download_all: bool = False
     list_only: bool = False
+    status: bool = False
     dry_run: bool = False
 
     # Output options

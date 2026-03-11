@@ -1,5 +1,7 @@
 """Pytest configuration and fixtures."""
 
+import json
+
 import pytest
 from moto import mock_aws
 import boto3
@@ -20,7 +22,6 @@ def mock_s3():
     """Provide a mocked S3 environment."""
     with mock_aws():
         client = boto3.client("s3", region_name="us-east-1")
-        # Create the bucket
         client.create_bucket(Bucket=BUCKET)
         yield client
 
@@ -28,11 +29,15 @@ def mock_s3():
 @pytest.fixture
 def populated_s3(mock_s3):
     """Provide S3 with test data."""
-    # Add some test files
     mock_s3.put_object(
         Bucket=BUCKET,
         Key="MANIFEST",
         Body=b"manifest content",
+    )
+    mock_s3.put_object(
+        Bucket=BUCKET,
+        Key="STATUS.json",
+        Body=json.dumps({"month": "2024-01", "status": "Complete"}).encode(),
     )
     mock_s3.put_object(
         Bucket=BUCKET,

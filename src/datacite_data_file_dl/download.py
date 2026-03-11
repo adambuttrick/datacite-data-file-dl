@@ -1,9 +1,11 @@
 """S3 download operations."""
 
 import fnmatch
+import json
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -21,11 +23,9 @@ from .retry import retry_with_backoff, retry_with_credential_refresh, RetryExhau
 from .safe_path import PathTraversalError, safe_join
 
 
-# S3 configuration
 DEFAULT_BUCKET = "monthly-datafile.datacite.org"
 BUCKET = DEFAULT_BUCKET  # Backwards compatibility alias
 
-# Size thresholds
 LARGE_DOWNLOAD_THRESHOLD_BYTES = 100 * 1024 * 1024  # 100 MB
 
 
@@ -65,7 +65,6 @@ def list_contents(
     pages = paginator.paginate(Bucket=bucket, Prefix=prefix, Delimiter="/")
 
     for page in pages:
-        # Common prefixes are "folders" in S3
         for cp in page.get("CommonPrefixes", []):
             folder = cp["Prefix"]
             name = folder[len(prefix) :].rstrip("/")
@@ -86,6 +85,27 @@ def get_object_size(client: "S3Client", key: str, bucket: str = BUCKET) -> int:
     """Get the size of an S3 object in bytes."""
     response = client.head_object(Bucket=bucket, Key=key)
     return response["ContentLength"]
+
+
+def get_manifest_metadata(client: "S3Client", bucket: str = BUCKET) -> datetime:
+    """Get the LastModified timestamp of the MANIFEST file.
+
+    Raises:
+        ClientError: If the MANIFEST file does not exist (NoSuchKey).
+    """
+    response = client.head_object(Bucket=bucket, Key="MANIFEST")
+    return response["LastModified"]
+
+
+def get_status_json(client: "S3Client", bucket: str = BUCKET) -> dict[str, object]:
+    """Download and parse the STATUS.json file.
+
+    Raises:
+        ClientError: If STATUS.json does not exist (NoSuchKey).
+    """
+    response = client.get_object(Bucket=bucket, Key="STATUS.json")
+    body = response["Body"].read()
+    return json.loads(body)
 
 
 def download_file(
@@ -149,7 +169,6 @@ def download_prefix(
 
     logger = get_logger()
     for key in tqdm(keys, desc="Files", disable=not show_progress):
-        # Preserve directory structure relative to prefix
         relative_path = key[len(prefix) :].lstrip("/")
         if not relative_path:
             relative_path = os.path.basename(key)
@@ -303,6 +322,7 @@ def download_file_with_retry(
                 max_retries=retries,
             )
         else:
+
             @retry_with_backoff(max_retries=retries)
             def _download_with_client() -> None:
                 _download(client)

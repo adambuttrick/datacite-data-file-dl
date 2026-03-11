@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 
 
 def format_size(size_bytes: int | float) -> str:
@@ -114,6 +115,40 @@ def format_list(
 
     if not folders and not files:
         lines.append("(empty)")
+
+    return "\n".join(lines)
+
+
+def format_status(
+    manifest_last_modified: datetime | None,
+    status_json: dict[str, object] | None,
+    json_output: bool = False,
+) -> str:
+    """Format data file status information."""
+    if json_output:
+        data: dict = {
+            "manifest_last_modified": (
+                manifest_last_modified.isoformat() if manifest_last_modified else None
+            ),
+            "status": status_json,
+        }
+        return json.dumps(data, indent=2)
+
+    lines = ["", "Data file status:"]
+
+    if manifest_last_modified is not None:
+        formatted_time = manifest_last_modified.strftime("%a, %d %b %Y %H:%M:%S %Z")
+        lines.append(f"  MANIFEST last modified:  {formatted_time}")
+    else:
+        lines.append("  MANIFEST last modified:  Not available")
+
+    if status_json is not None:
+        month = status_json.get("month", "Unknown")
+        status = status_json.get("status", "Unknown")
+        lines.append(f"  Month:                   {month}")
+        lines.append(f"  Status:                  {status}")
+    else:
+        lines.append("  STATUS.json:             Not available")
 
     return "\n".join(lines)
 

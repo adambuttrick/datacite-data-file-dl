@@ -8,6 +8,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from logging import Logger
 from typing import TYPE_CHECKING
 
+from botocore.exceptions import ClientError
+
 from .auth import AuthenticationError, CredentialManager
 from .cli import parse_args
 from .config import Config, load_config
@@ -17,6 +19,8 @@ from .download import (
     LARGE_DOWNLOAD_THRESHOLD_BYTES,
     download_file_with_retry,
     download_worker,
+    get_manifest_metadata,
+    get_status_json,
     list_all_objects,
     list_contents,
     parse_size,
@@ -25,7 +29,7 @@ from .download import (
 from .exit_codes import ExitCode
 from .interactive import select_download
 from .log import get_logger, setup_logging
-from .output import format_error, format_list, format_success
+from .output import format_error, format_list, format_status, format_success
 from .progress import AggregateProgress, ProgressTracker
 from .safe_path import PathTraversalError, safe_join
 
@@ -60,12 +64,9 @@ def _validate_credentials(config: Config) -> int | None:
     return None
 
 
-def _authenticate(
-    config: Config, logger: Logger
-) -> tuple[CredentialManager, "S3Client"] | int:
+def _authenticate(config: Config, logger: Logger) -> tuple[CredentialManager, "S3Client"] | int:
     """Assumes credentials have been validated by _validate_credentials."""
     logger.info("Authenticating with DataCite API...")
-    # These assertions are safe because _validate_credentials checks for None
     assert config.username is not None
     assert config.password is not None
     try:
@@ -92,9 +93,7 @@ def _authenticate(
     return cred_manager, client
 
 
-def _handle_list_mode(
-    client: "S3Client", config: Config, logger: Logger
-) -> int:
+def _handle_list_mode(client: "S3Client", config: Config, logger: Logger) -> int:
     prefix = (config.path or "").strip("/")
     if prefix:
         prefix += "/"
@@ -121,9 +120,60 @@ def _handle_list_mode(
         return ExitCode.NETWORK_ERROR
 
 
-def _resolve_prefix(
-    config: Config, logger: Logger
-) -> str | int | None:
+def _handle_status_mode(client: "S3Client", config: Config, logger: Logger) -> int:
+    bucket = config.bucket or DEFAULT_BUCKET
+    manifest_last_modified = None
+    status_json = None
+
+    try:
+        manifest_last_modified = get_manifest_metadata(client, bucket=bucket)
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code in ("404", "NoSuchKey"):
+            logger.debug("MANIFEST file not found in bucket")
+        else:
+            if config.json_output:
+                print(format_error("NETWORK_ERROR", str(e), json_output=True))
+            else:
+                logger.error(f"Failed to fetch MANIFEST metadata: {e}")
+            return ExitCode.NETWORK_ERROR
+    except Exception as e:
+        if config.json_output:
+            print(format_error("NETWORK_ERROR", str(e), json_output=True))
+        else:
+            logger.error(f"Failed to fetch MANIFEST metadata: {e}")
+        return ExitCode.NETWORK_ERROR
+
+    try:
+        status_json = get_status_json(client, bucket=bucket)
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code in ("404", "NoSuchKey"):
+            logger.debug("STATUS.json file not found in bucket")
+        else:
+            if config.json_output:
+                print(format_error("NETWORK_ERROR", str(e), json_output=True))
+            else:
+                logger.error(f"Failed to fetch STATUS.json: {e}")
+            return ExitCode.NETWORK_ERROR
+    except Exception as e:
+        if config.json_output:
+            print(format_error("NETWORK_ERROR", str(e), json_output=True))
+        else:
+            logger.error(f"Failed to fetch STATUS.json: {e}")
+        return ExitCode.NETWORK_ERROR
+
+    print(
+        format_status(
+            manifest_last_modified=manifest_last_modified,
+            status_json=status_json,
+            json_output=config.json_output,
+        )
+    )
+    return ExitCode.SUCCESS
+
+
+def _resolve_prefix(config: Config, logger: Logger) -> str | int | None:
     """Returns S3 prefix, ExitCode on error, or None for interactive mode."""
     bucket = config.bucket or DEFAULT_BUCKET
 
@@ -238,11 +288,13 @@ def _download_sequential(
                 bucket=bucket,
             )
             tracker.mark_complete(key, obj["Size"], obj["ETag"])
-            downloaded.append({
-                "path": key,
-                "size": obj["Size"],
-                "checksum": obj["ETag"].strip('"'),
-            })
+            downloaded.append(
+                {
+                    "path": key,
+                    "size": obj["Size"],
+                    "checksum": obj["ETag"].strip('"'),
+                }
+            )
         except KeyboardInterrupt:
             raise
         except Exception as e:
@@ -294,11 +346,13 @@ def _download_parallel(
                 result = future.result()
                 if result.success:
                     tracker.mark_complete(result.key, result.size, result.checksum)
-                    downloaded.append({
-                        "path": result.key,
-                        "size": result.size,
-                        "checksum": result.checksum,
-                    })
+                    downloaded.append(
+                        {
+                            "path": result.key,
+                            "size": result.size,
+                            "checksum": result.checksum,
+                        }
+                    )
                 else:
                     logger.error(f"Failed to download {result.key}: {result.error}")
                     failed += 1
@@ -338,6 +392,7 @@ def main() -> int:
         path=args.path,
         download_all=args.download_all,
         list_only=args.list,
+        status=args.status,
         dry_run=args.dry_run,
         json_output=args.json,
         quiet=args.quiet,
@@ -372,6 +427,9 @@ def main() -> int:
     if config.list_only:
         return _handle_list_mode(client, config, logger)
 
+    if config.status:
+        return _handle_status_mode(client, config, logger)
+
     tracker = ProgressTracker(config.output_dir)
     if config.fresh:
         tracker.clear()
@@ -389,7 +447,12 @@ def main() -> int:
         return prefix_result
     if prefix_result is None:
         try:
-            select_download(client, config.output_dir, credential_manager=cred_manager)
+            select_download(
+                client,
+                config.output_dir,
+                credential_manager=cred_manager,
+                bucket=config.bucket or DEFAULT_BUCKET,
+            )
             return ExitCode.SUCCESS
         except KeyboardInterrupt:
             logger.info("Cancelled by user.")
@@ -399,9 +462,7 @@ def main() -> int:
             return ExitCode.NETWORK_ERROR
     prefix = prefix_result
 
-    list_result = _build_download_list(
-        client, prefix, config, tracker, max_size_bytes, logger
-    )
+    list_result = _build_download_list(client, prefix, config, tracker, max_size_bytes, logger)
     if isinstance(list_result, int):
         return list_result
     to_download, skipped = list_result
@@ -409,16 +470,19 @@ def main() -> int:
     if not to_download:
         logger.info("All files already downloaded or filtered out.")
         if config.json_output:
-            print(format_success(
-                files=[], total_bytes=0, elapsed_seconds=0,
-                json_output=True, skipped=skipped,
-            ))
+            print(
+                format_success(
+                    files=[],
+                    total_bytes=0,
+                    elapsed_seconds=0,
+                    json_output=True,
+                    skipped=skipped,
+                )
+            )
         return ExitCode.SUCCESS
 
     total_size = sum(obj["Size"] for obj in to_download)
-    logger.info(
-        f"Found {len(to_download)} files to download ({total_size / (1024 * 1024):.1f} MB)"
-    )
+    logger.info(f"Found {len(to_download)} files to download ({total_size / (1024 * 1024):.1f} MB)")
 
     if config.dry_run:
         for obj in to_download:
@@ -428,8 +492,7 @@ def main() -> int:
     if not config.yes and not config.quiet and sys.stdin.isatty():
         if total_size > LARGE_DOWNLOAD_THRESHOLD_BYTES:
             response = input(
-                f"Download {len(to_download)} files "
-                f"({total_size / (1024 * 1024):.1f} MB)? [y/N] "
+                f"Download {len(to_download)} files ({total_size / (1024 * 1024):.1f} MB)? [y/N] "
             )
             if response.lower() != "y":
                 logger.info("Cancelled by user.")
@@ -443,8 +506,7 @@ def main() -> int:
             )
         else:
             downloaded, failed = _download_parallel(
-                to_download, prefix, config, tracker, cred_manager,
-                client, total_size, logger
+                to_download, prefix, config, tracker, cred_manager, client, total_size, logger
             )
     except KeyboardInterrupt:
         logger.info("Cancelled by user.")

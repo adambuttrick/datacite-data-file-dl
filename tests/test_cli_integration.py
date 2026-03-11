@@ -51,9 +51,7 @@ class TestCLIAuthFailures:
         """Should fail with AUTH_FAILURE when password is missing."""
         monkeypatch.delenv("DATACITE_PASSWORD", raising=False)
 
-        monkeypatch.setattr(
-            sys, "argv", ["datacite-data-file-dl", "-u", "testuser", "--json"]
-        )
+        monkeypatch.setattr(sys, "argv", ["datacite-data-file-dl", "-u", "testuser", "--json"])
 
         result = main()
 
@@ -91,13 +89,10 @@ class TestCLIListMode:
             with patch(AUTH_PATCH_PATH) as mock_post:
                 mock_post.return_value = create_mock_auth_response()
 
-                # Set up S3
                 client = boto3.client("s3", region_name="us-east-1")
                 client.create_bucket(Bucket=BUCKET)
                 client.put_object(Bucket=BUCKET, Key="MANIFEST", Body=b"content")
-                client.put_object(
-                    Bucket=BUCKET, Key="dois/updated_2024-01/file.json", Body=b"{}"
-                )
+                client.put_object(Bucket=BUCKET, Key="dois/updated_2024-01/file.json", Body=b"{}")
 
                 monkeypatch.setattr(
                     sys,
@@ -131,12 +126,8 @@ class TestCLIListMode:
 
                 client = boto3.client("s3", region_name="us-east-1")
                 client.create_bucket(Bucket=BUCKET)
-                client.put_object(
-                    Bucket=BUCKET, Key="dois/updated_2024-01/file.json", Body=b"{}"
-                )
-                client.put_object(
-                    Bucket=BUCKET, Key="dois/updated_2024-02/file.json", Body=b"{}"
-                )
+                client.put_object(Bucket=BUCKET, Key="dois/updated_2024-01/file.json", Body=b"{}")
+                client.put_object(Bucket=BUCKET, Key="dois/updated_2024-02/file.json", Body=b"{}")
 
                 monkeypatch.setattr(
                     sys,
@@ -250,9 +241,7 @@ class TestCLIDownload:
                 client = boto3.client("s3", region_name="us-east-1")
                 client.create_bucket(Bucket=BUCKET)
                 client.put_object(Bucket=BUCKET, Key="MANIFEST", Body=b"manifest")
-                client.put_object(
-                    Bucket=BUCKET, Key="dois/updated_2024-01/file.json", Body=b"{}"
-                )
+                client.put_object(Bucket=BUCKET, Key="dois/updated_2024-01/file.json", Body=b"{}")
 
                 output_dir = tmp_path / "output"
                 output_dir.mkdir()
@@ -291,7 +280,6 @@ class TestCLIDownload:
 
                 client = boto3.client("s3", region_name="us-east-1")
                 client.create_bucket(Bucket=BUCKET)
-                # Empty bucket
 
                 monkeypatch.setattr(
                     sys,
@@ -414,9 +402,7 @@ class TestCLIBucketConfig:
 
                 client = boto3.client("s3", region_name="us-east-1")
                 client.create_bucket(Bucket=custom_bucket)
-                client.put_object(
-                    Bucket=custom_bucket, Key="custom-file.txt", Body=b"custom"
-                )
+                client.put_object(Bucket=custom_bucket, Key="custom-file.txt", Body=b"custom")
 
                 monkeypatch.setattr(
                     sys,
@@ -440,3 +426,183 @@ class TestCLIBucketConfig:
                 captured = capsys.readouterr()
                 output = json.loads(captured.out)
                 assert any(f["name"] == "custom-file.txt" for f in output["files"])
+
+
+class TestCLIStatus:
+    """Test --status functionality."""
+
+    def test_status_json_output(self, capsys, monkeypatch):
+        """Should output status info as JSON."""
+        with mock_aws():
+            with patch(AUTH_PATCH_PATH) as mock_post:
+                mock_post.return_value = create_mock_auth_response()
+
+                client = boto3.client("s3", region_name="us-east-1")
+                client.create_bucket(Bucket=BUCKET)
+                client.put_object(Bucket=BUCKET, Key="MANIFEST", Body=b"content")
+                client.put_object(
+                    Bucket=BUCKET,
+                    Key="STATUS.json",
+                    Body=json.dumps({"month": "2026-02", "status": "Complete"}).encode(),
+                )
+
+                monkeypatch.setattr(
+                    sys,
+                    "argv",
+                    [
+                        "datacite-data-file-dl",
+                        "-u",
+                        "user",
+                        "-p",
+                        "pass",
+                        "--status",
+                        "--json",
+                    ],
+                )
+
+                result = main()
+
+                assert result == ExitCode.SUCCESS
+                captured = capsys.readouterr()
+                output = json.loads(captured.out)
+                assert "manifest_last_modified" in output
+                assert output["manifest_last_modified"] is not None
+                assert output["status"]["month"] == "2026-02"
+                assert output["status"]["status"] == "Complete"
+
+    def test_status_human_readable(self, capsys, monkeypatch):
+        """Should output human-readable status."""
+        with mock_aws():
+            with patch(AUTH_PATCH_PATH) as mock_post:
+                mock_post.return_value = create_mock_auth_response()
+
+                client = boto3.client("s3", region_name="us-east-1")
+                client.create_bucket(Bucket=BUCKET)
+                client.put_object(Bucket=BUCKET, Key="MANIFEST", Body=b"content")
+                client.put_object(
+                    Bucket=BUCKET,
+                    Key="STATUS.json",
+                    Body=json.dumps({"month": "2026-02", "status": "Complete"}).encode(),
+                )
+
+                monkeypatch.setattr(
+                    sys,
+                    "argv",
+                    [
+                        "datacite-data-file-dl",
+                        "-u",
+                        "user",
+                        "-p",
+                        "pass",
+                        "--status",
+                    ],
+                )
+
+                result = main()
+
+                assert result == ExitCode.SUCCESS
+                captured = capsys.readouterr()
+                assert "Data file status:" in captured.out
+                assert "2026-02" in captured.out
+                assert "Complete" in captured.out
+
+    def test_status_missing_manifest(self, capsys, monkeypatch):
+        """Should handle missing MANIFEST gracefully."""
+        with mock_aws():
+            with patch(AUTH_PATCH_PATH) as mock_post:
+                mock_post.return_value = create_mock_auth_response()
+
+                client = boto3.client("s3", region_name="us-east-1")
+                client.create_bucket(Bucket=BUCKET)
+                # Only STATUS.json, no MANIFEST
+                client.put_object(
+                    Bucket=BUCKET,
+                    Key="STATUS.json",
+                    Body=json.dumps({"month": "2026-02", "status": "Complete"}).encode(),
+                )
+
+                monkeypatch.setattr(
+                    sys,
+                    "argv",
+                    [
+                        "datacite-data-file-dl",
+                        "-u",
+                        "user",
+                        "-p",
+                        "pass",
+                        "--status",
+                        "--json",
+                    ],
+                )
+
+                result = main()
+
+                assert result == ExitCode.SUCCESS
+                captured = capsys.readouterr()
+                output = json.loads(captured.out)
+                assert output["manifest_last_modified"] is None
+                assert output["status"]["month"] == "2026-02"
+
+    def test_status_missing_status_json(self, capsys, monkeypatch):
+        """Should handle missing STATUS.json gracefully."""
+        with mock_aws():
+            with patch(AUTH_PATCH_PATH) as mock_post:
+                mock_post.return_value = create_mock_auth_response()
+
+                client = boto3.client("s3", region_name="us-east-1")
+                client.create_bucket(Bucket=BUCKET)
+                # Only MANIFEST, no STATUS.json
+                client.put_object(Bucket=BUCKET, Key="MANIFEST", Body=b"content")
+
+                monkeypatch.setattr(
+                    sys,
+                    "argv",
+                    [
+                        "datacite-data-file-dl",
+                        "-u",
+                        "user",
+                        "-p",
+                        "pass",
+                        "--status",
+                        "--json",
+                    ],
+                )
+
+                result = main()
+
+                assert result == ExitCode.SUCCESS
+                captured = capsys.readouterr()
+                output = json.loads(captured.out)
+                assert output["manifest_last_modified"] is not None
+                assert output["status"] is None
+
+    def test_status_empty_bucket(self, capsys, monkeypatch):
+        """Should handle empty bucket gracefully."""
+        with mock_aws():
+            with patch(AUTH_PATCH_PATH) as mock_post:
+                mock_post.return_value = create_mock_auth_response()
+
+                client = boto3.client("s3", region_name="us-east-1")
+                client.create_bucket(Bucket=BUCKET)
+
+                monkeypatch.setattr(
+                    sys,
+                    "argv",
+                    [
+                        "datacite-data-file-dl",
+                        "-u",
+                        "user",
+                        "-p",
+                        "pass",
+                        "--status",
+                        "--json",
+                    ],
+                )
+
+                result = main()
+
+                assert result == ExitCode.SUCCESS
+                captured = capsys.readouterr()
+                output = json.loads(captured.out)
+                assert output["manifest_last_modified"] is None
+                assert output["status"] is None

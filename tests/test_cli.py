@@ -72,6 +72,11 @@ class TestDownloadFlags:
         args = parse_args(["--list"])
         assert args.list is True
 
+    def test_status_flag(self):
+        """Should parse --status flag."""
+        args = parse_args(["--status"])
+        assert args.status is True
+
     def test_dry_run_flag(self):
         """Should parse --dry-run flag."""
         args = parse_args(["--dry-run"])
