@@ -74,6 +74,16 @@ datacite-data-file-dl --list --path dois/
 datacite-data-file-dl --list --path dois/ --json
 ```
 
+### Check Data File Status
+
+```bash
+# Check if the latest monthly data file is ready
+datacite-data-file-dl --status
+
+# JSON output for scripting
+datacite-data-file-dl --status --json
+```
+
 ### Download with Filtering
 
 ```bash

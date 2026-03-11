@@ -1,6 +1,11 @@
 """Tests for download operations."""
 
+import pytest
+from botocore.exceptions import ClientError
+
 from datacite_data_file_dl.download import (
+    get_manifest_metadata,
+    get_status_json,
     should_download_file,
     parse_size,
 )
@@ -97,3 +102,35 @@ class TestShouldDownloadFile:
             max_size=500,
         )
         assert result is False
+
+
+class TestGetManifestMetadata:
+    """Test MANIFEST metadata retrieval."""
+
+    def test_returns_last_modified(self, populated_s3):
+        """Should return LastModified datetime from MANIFEST."""
+        result = get_manifest_metadata(populated_s3)
+        assert result is not None
+        assert hasattr(result, "year")
+
+    def test_missing_manifest(self, mock_s3):
+        """Should raise ClientError when MANIFEST doesn't exist."""
+        with pytest.raises(ClientError) as exc_info:
+            get_manifest_metadata(mock_s3)
+        assert exc_info.value.response["Error"]["Code"] in ("404", "NoSuchKey")
+
+
+class TestGetStatusJson:
+    """Test STATUS.json retrieval."""
+
+    def test_returns_parsed_json(self, populated_s3):
+        """Should return parsed STATUS.json contents."""
+        result = get_status_json(populated_s3)
+        assert result["month"] == "2024-01"
+        assert result["status"] == "Complete"
+
+    def test_missing_status_json(self, mock_s3):
+        """Should raise ClientError when STATUS.json doesn't exist."""
+        with pytest.raises(ClientError) as exc_info:
+            get_status_json(mock_s3)
+        assert exc_info.value.response["Error"]["Code"] in ("404", "NoSuchKey")

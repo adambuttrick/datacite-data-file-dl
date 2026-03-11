@@ -17,6 +17,8 @@ Examples:
   %(prog)s --list --path dois/                # List contents of folder
   %(prog)s --all -o ./data                    # Download entire bucket
   %(prog)s --since 2024-01 --until 2024-06    # Download date range
+  %(prog)s --status                              # Check data file status
+  %(prog)s --status --json                       # Status as JSON
   %(prog)s --all -w 8                         # Parallel download with 8 workers
 
 Environment variables:
@@ -91,6 +93,11 @@ Config file: ~/.datacite-data-file-dl.toml or ~/.config/datacite-data-file-dl/co
         "--list",
         action="store_true",
         help="List contents without downloading",
+    )
+    download_group.add_argument(
+        "--status",
+        action="store_true",
+        help="Check the status of the monthly data file",
     )
     download_group.add_argument(
         "--dry-run",
